@@ -27,3 +27,4 @@ class LossPlotCallback(Callback):
         plt.ylabel("Loss")
         plt.legend()
         plt.pause(0.01)
+        plt.show()
