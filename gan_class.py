@@ -1,8 +1,8 @@
 from enum import Enum
 
 import tensorflow as tf
-from keras import Model
-from keras.engine import data_adapter
+from keras.src.engine.data_adapter import unpack_x_y_sample_weight
+from tensorflow.keras import Model
 
 bce_loss = tf.keras.losses.BinaryCrossentropy(from_logits=True)
 
@@ -26,7 +26,7 @@ class GAN(Model):
         self.loss_type = loss_type
 
     def train_step(self, data):
-        real_images, y, _ = data_adapter.unpack_x_y_sample_weight(data)
+        real_images, y, _ = unpack_x_y_sample_weight(data)
 
         # Generate noise
         batch_size = tf.shape(real_images)[0]
