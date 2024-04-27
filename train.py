@@ -28,7 +28,7 @@ image_side_length = 28
 target_size = (image_side_length, image_side_length)
 channels = 1
 image_shape = (target_size[0], target_size[1], channels)
-increase_factor = 2
+increase_factor = 8
 BATCH_SIZE = 64 * increase_factor
 noise_dim = 200
 start_epoch = 0
@@ -40,9 +40,11 @@ discriminator_factor = 0.05
 generator_lr = 1e-4 * 0.25 * increase_factor * generator_factor
 discriminator_lr = 1e-4 * 0.25 * increase_factor * discriminator_factor
 
-generated_images_dir = "D:\\Programming\\pixilart_api_backend\\gan\\generated_images"
+generated_images_dir = "generated_images"
 os.makedirs(generated_images_dir, exist_ok=True)
 
+models_dir = "models"
+os.makedirs(models_dir, exist_ok=True)
 
 # Normalization helper
 def preprocess(image: tf.Tensor, label: tf.Tensor):
@@ -134,9 +136,6 @@ steps_per_epoch = total_samples // BATCH_SIZE
 # Define the optimizers
 generator_optimizer = tf.keras.optimizers.Adam(generator_lr)
 discriminator_optimizer = tf.keras.optimizers.Adam(discriminator_lr)
-
-models_dir = "D:\\Programming\\pixilart_api_backend\\gan\\models"
-os.makedirs(models_dir, exist_ok=True)
 
 # Load from models directory
 models_list = os.listdir(models_dir)
