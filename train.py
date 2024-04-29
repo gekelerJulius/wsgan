@@ -215,7 +215,7 @@ image_gen_callback = ImageGenerationCallback(
     generator_model=gan.generator,
     noise_dim=200,
     num_images=9,
-    generate_interval=5,
+    generate_interval=10,
     output_dir=generated_images_dir,
 )
 

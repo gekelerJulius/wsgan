@@ -39,8 +39,9 @@ class ImageGenerationCallback(Callback):
             plt.subplot(3, 3, i + 1)
             plt.imshow((predictions[i] * 127.5 + 127.5).numpy().astype(int))
             plt.axis("off")
-        plt.savefig(os.path.join(self.output_dir, f"image_at_epoch_{epoch}.png"))
-        plt.close(fig)
+        # plt.savefig(os.path.join(self.output_dir, f"image_at_epoch_{epoch}.png"))
+        # plt.close(fig)
+        plt.show()
 
 
 if __name__ == "__main__":

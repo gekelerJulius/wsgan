@@ -25,4 +25,4 @@ class LossPlotCallback(Callback):
         plt.xlabel("Epoch")
         plt.ylabel("Loss")
         plt.legend()
-        plt.pause(0.01)
+        plt.show()

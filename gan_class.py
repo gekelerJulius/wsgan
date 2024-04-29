@@ -1,6 +1,5 @@
 import tensorflow as tf
 from keras import Model
-from keras.engine import data_adapter
 
 
 class ConditionalGAN(Model):
@@ -20,7 +19,7 @@ class ConditionalGAN(Model):
         self.g_optimizer = g_optimizer
 
     def train_step(self, data):
-        real_images, _, _ = data_adapter.unpack_x_y_sample_weight(data)
+        real_images, _ = data
 
         # Generate noise
         batch_size = tf.shape(real_images)[0]
