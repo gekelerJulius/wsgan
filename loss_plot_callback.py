@@ -10,18 +10,17 @@ class LossPlotCallback(Callback):
         self.disc_losses = []
 
     def on_epoch_end(self, epoch, logs=None):
-        # Append the latest losses from logs
         self.gen_losses.append(logs.get("g_loss"))
         self.disc_losses.append(logs.get("d_loss"))
 
         if (epoch + 1) % self.plot_interval == 0:
-            self.draw_losses(epoch + 1)
+            self.draw_losses()
 
-    def draw_losses(self, epoch):
+    def draw_losses(self):
         plt.figure(figsize=(10, 5), num="Losses")
         plt.clf()
-        plt.plot(range(1, epoch + 1), self.gen_losses, label="Generator Loss")
-        plt.plot(range(1, epoch + 1), self.disc_losses, label="Discriminator Loss")
+        plt.plot(self.gen_losses, label="Generator Loss")
+        plt.plot(self.disc_losses, label="Discriminator Loss")
         plt.title("Losses over Epochs")
         plt.xlabel("Epoch")
         plt.ylabel("Loss")

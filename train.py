@@ -1,17 +1,18 @@
 import os
+from typing import Union
+
 import tensorflow as tf
 from keras import layers
+from matplotlib import pyplot as plt
 from tensorflow import keras
 
-from discriminator_model import create_discriminator
-from gan_class import GAN, ImplementedLosses
+from gan_class import ConditionalGAN
 from gen_images_callback import ImageGenerationCallback
-from gen_model import create_generator
 from loss_plot_callback import LossPlotCallback
 from model_checkpoint_callback import ModelCheckpointCallback
+from lightweight_gen import create_lightweight_generator as create_generator
+from lightweight_disc import create_lightweight_discriminator as create_discriminator
 
-# images_path = "D:\\Programming\\pixilart_api_backend\\downloaded_images\\pixel_art_cats"
-images_path = None
 training_active = True
 
 # Suppressing tf.hub warnings
@@ -19,9 +20,31 @@ tf.get_logger().setLevel("ERROR")
 
 # configure the GPU
 keras.mixed_precision.set_global_policy("mixed_float16")
-gpu_options = tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=0.8)
-config = tf.compat.v1.ConfigProto(gpu_options=gpu_options)
-session = tf.compat.v1.Session(config=config)
+gpus = tf.config.experimental.list_physical_devices("GPU")
+if gpus:
+    try:
+        # Restrict TensorFlow to only allocate 80% of the total memory of each GPU
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+            tf.config.experimental.set_virtual_device_configuration(
+                gpu,
+                [
+                    tf.config.experimental.VirtualDeviceConfiguration(
+                        memory_limit=1024 * 10
+                    )
+                ],
+            )
+    except RuntimeError as e:
+        print(e)
+
+# data_images_dir: Union[str, None] = "real_images_segmented_cats"
+data_images_dir: Union[str, None] = None
+
+models_dir = "models"
+os.makedirs(models_dir, exist_ok=True)
+
+generated_images_dir = "generated_images"
+os.makedirs(generated_images_dir, exist_ok=True)
 
 # set the parameters for dataset
 image_side_length = 28
@@ -29,22 +52,17 @@ target_size = (image_side_length, image_side_length)
 channels = 1
 image_shape = (target_size[0], target_size[1], channels)
 increase_factor = 8
-BATCH_SIZE = 64 * increase_factor
+BATCH_SIZE = int(64 * increase_factor)
 noise_dim = 200
 start_epoch = 0
-EPOCHS = 500
+EPOCHS = 5000
 num_examples_to_generate = 9
 # Default lr is 1e-4
 generator_factor = 1
-discriminator_factor = 0.05
+discriminator_factor = 0.01
 generator_lr = 1e-4 * 0.25 * increase_factor * generator_factor
 discriminator_lr = 1e-4 * 0.25 * increase_factor * discriminator_factor
 
-generated_images_dir = "generated_images"
-os.makedirs(generated_images_dir, exist_ok=True)
-
-models_dir = "models"
-os.makedirs(models_dir, exist_ok=True)
 
 # Normalization helper
 def preprocess(image: tf.Tensor, label: tf.Tensor):
@@ -55,11 +73,9 @@ def preprocess(image: tf.Tensor, label: tf.Tensor):
 # Create augmentation layers
 data_augmentation = keras.Sequential(
     [
-        layers.RandomFlip("horizontal_and_vertical"),
-        layers.RandomRotation(0.05),
-        layers.RandomZoom(0.05),
-        layers.RandomContrast(0.3),
-        layers.RandomBrightness(0.3),
+        layers.RandomFlip("horizontal"),
+        layers.RandomContrast(0.1),
+        layers.RandomBrightness(0.1),
     ]
 )
 
@@ -73,9 +89,10 @@ def get_datasets() -> tf.data.Dataset:
     color_mode = "grayscale"
     if channels == 3:
         color_mode = "rgb"
-    if images_path is not None:
+
+    if data_images_dir is not None:
         train_ds = keras.utils.image_dataset_from_directory(
-            images_path,
+            data_images_dir,
             label_mode=None,
             image_size=target_size,
             batch_size=None,
@@ -83,36 +100,44 @@ def get_datasets() -> tf.data.Dataset:
             shuffle=True,
         ).map(lambda x: (x, 0), num_parallel_calls=tf.data.AUTOTUNE)
     else:
-        # Use MNIST dataset
-        (train_images, _), (_, _) = keras.datasets.mnist.load_data()
-        train_images = train_images.reshape(train_images.shape[0], 28, 28, 1).astype("float32")
-        train_ds = tf.data.Dataset.from_tensor_slices(train_images).map(
-            lambda x: (x, 0), num_parallel_calls=tf.data.AUTOTUNE
+        # Use the Fashion MNIST dataset (only use one class)
+        used_class = 5
+        (train_images, train_labels), _ = keras.datasets.fashion_mnist.load_data()
+        train_images = train_images[train_labels == used_class]
+        train_labels = train_labels[train_labels == used_class]
+        train_ds = tf.data.Dataset.from_tensor_slices((train_images, train_labels))
+        # Set the labels to 0
+        train_ds = train_ds.map(
+            lambda x, y: (x, 0), num_parallel_calls=tf.data.AUTOTUNE
+        )
+        # Unsqueezing the channel dimension so images are (28, 28, 1) instead of (28, 28)
+        train_ds = train_ds.map(
+            lambda x, y: (tf.expand_dims(x, -1), y),
+            num_parallel_calls=tf.data.AUTOTUNE,
         )
 
     # Normalize to [-1, 1], shuffle and batch
     train_ds = (
         train_ds.map(augment)
         .map(preprocess, tf.data.AUTOTUNE)
-        .shuffle(BATCH_SIZE * 10)
+        .shuffle(BATCH_SIZE * 6)
         .batch(BATCH_SIZE)
         .prefetch(tf.data.AUTOTUNE)
     )
 
-    # Show a few samples
-    # plt.figure(figsize=(10, 10))
-    # for images, labels in train_ds.take(1):
-    #     for j in range(4):
-    #         plt.subplot(2, 2, j + 1)
-    #         plt.imshow(images[j].numpy().reshape(target_size), cmap="gray")
-    #         plt.title(f"Label: {labels[j]}")
-    #         plt.axis("off")
-    # plt.show()
+    # Show 9 samples
+    plt.figure(figsize=(10, 10))
+    for images, _ in train_ds.take(1):
+        for i in range(9):
+            plt.subplot(3, 3, i + 1)
+            plt.imshow((images[i].numpy() + 1) / 2)
+            plt.axis("off")
+    plt.show()
+    plt.close()
     return train_ds
 
 
 dataset = get_datasets()
-
 total_batches = len(list(dataset))
 total_samples = total_batches * BATCH_SIZE
 steps_per_epoch = total_samples // BATCH_SIZE
@@ -145,25 +170,42 @@ discriminator_models = [model for model in models_list if "discriminator" in mod
 generator = create_generator(noise_dim, image_side_length, channels)
 discriminator = create_discriminator(image_shape)
 
-if generator_models:
-    latest_generator_model = sorted(generator_models)[-1]
-    generator.load_weights(os.path.join(models_dir, latest_generator_model))
-    print(f"Loaded generator model: {latest_generator_model}")
+if generator_models and discriminator_models:
+    saved_epochs = [
+        int(model.split("_")[-1].split(".")[0]) for model in generator_models
+    ]
+    latest_saved_epoch = max(saved_epochs)
+    latest_saved_epoch_generator_file = [
+        model for model in generator_models if str(latest_saved_epoch) in model
+    ][0]
+    latest_saved_epoch_discriminator_file = [
+        model for model in discriminator_models if str(latest_saved_epoch) in model
+    ][0]
 
-if discriminator_models:
-    latest_discriminator_model = sorted(discriminator_models)[-1]
-    discriminator.load_weights(os.path.join(models_dir, latest_discriminator_model))
-    print(f"Loaded discriminator model: {latest_discriminator_model}")
+    if latest_saved_epoch_generator_file and latest_saved_epoch_discriminator_file:
+        generator.load_weights(
+            os.path.join(models_dir, latest_saved_epoch_generator_file)
+        )
+        discriminator.load_weights(
+            os.path.join(models_dir, latest_saved_epoch_discriminator_file)
+        )
+        start_epoch = latest_saved_epoch
+        print(f"Loaded models from epoch {start_epoch}")
+
 
 discriminator.summary()
 generator.summary()
 
-gan = GAN(discriminator=discriminator, generator=generator, noise_dim=noise_dim)
+gan = ConditionalGAN(
+    discriminator=discriminator,
+    generator=generator,
+    noise_dim=noise_dim,
+)
 gan.compile(
     d_optimizer=tf.keras.optimizers.Adam(learning_rate=discriminator_lr),
     g_optimizer=tf.keras.optimizers.Adam(learning_rate=generator_lr),
-    loss_type=ImplementedLosses.WASSERSTEIN,
 )
+
 
 loss_plot_callback = LossPlotCallback(plot_interval=1)
 checkpoint_callback = ModelCheckpointCallback(
@@ -177,14 +219,13 @@ image_gen_callback = ImageGenerationCallback(
     output_dir=generated_images_dir,
 )
 
-
 gan.fit(
     dataset,
+    initial_epoch=start_epoch,
     epochs=EPOCHS,
     steps_per_epoch=steps_per_epoch,
     batch_size=BATCH_SIZE,
     verbose=1,
-    initial_epoch=start_epoch,
     shuffle=True,
     callbacks=[loss_plot_callback, image_gen_callback, checkpoint_callback],
 )
