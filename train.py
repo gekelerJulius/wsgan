@@ -146,14 +146,14 @@ def train():
         )
 
         # Show 9 samples
-        plt.figure(figsize=(10, 10))
-        for images, _ in train_ds.take(1):
-            for i in range(9):
-                plt.subplot(3, 3, i + 1)
-                plt.imshow((images[i].numpy() + 1) / 2)
-                plt.axis("off")
-        plt.show()
-        plt.close()
+        # plt.figure(figsize=(10, 10))
+        # for images, _ in train_ds.take(1):
+        #     for i in range(9):
+        #         plt.subplot(3, 3, i + 1)
+        #         plt.imshow((images[i].numpy() + 1) / 2)
+        #         plt.axis("off")
+        # plt.show()
+        # plt.close()
         return train_ds
 
     dataset = get_datasets()
