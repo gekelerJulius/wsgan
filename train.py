@@ -1,4 +1,5 @@
 import os
+from enum import Enum
 from typing import Union
 
 import tensorflow as tf
@@ -39,6 +40,15 @@ def train():
         except RuntimeError as e:
             print(e)
 
+
+
+    class AvailableDatasets(Enum):
+        FASHION_MNIST = "fashion_mnist"
+        CELEBA = "celeba"
+        FROMPATH = "frompath"
+
+    active_dataset: AvailableDatasets = AvailableDatasets.CELEBA
+
     # data_images_dir: Union[str, None] = "real_images_segmented_cats"
     data_images_dir: Union[str, None] = None
 
@@ -49,11 +59,11 @@ def train():
     os.makedirs(generated_images_dir, exist_ok=True)
 
     # set the parameters for dataset
-    image_side_length = 28
+    image_side_length = 64
     target_size = (image_side_length, image_side_length)
     channels = 1
     image_shape = (target_size[0], target_size[1], channels)
-    increase_factor = 8
+    increase_factor = 4
     BATCH_SIZE = int(64 * increase_factor)
     noise_dim = 200
     start_epoch = 0
@@ -88,7 +98,34 @@ def train():
         if channels == 3:
             color_mode = "rgb"
 
-        if data_images_dir is not None:
+        train_ds = None
+        if active_dataset == AvailableDatasets.CELEBA:
+            celeb_a_path = "data/celeb_a"
+            train_ds = keras.utils.image_dataset_from_directory(
+                celeb_a_path,
+                label_mode=None,
+                image_size=target_size,
+                batch_size=None,
+                color_mode=color_mode,
+                shuffle=True,
+            ).map(lambda x: (x, 0), num_parallel_calls=tf.data.AUTOTUNE)
+
+
+        elif active_dataset == AvailableDatasets.FASHION_MNIST:
+            used_class = 5
+            (train_images, train_labels), _ = keras.datasets.fashion_mnist.load_data()
+            train_images = train_images[train_labels == used_class]
+            train_labels = train_labels[train_labels == used_class]
+            train_ds = tf.data.Dataset.from_tensor_slices((train_images, train_labels))
+            train_ds = train_ds.map(
+                lambda x, y: (x, 0), num_parallel_calls=tf.data.AUTOTUNE
+            )
+            # Unsqueezing the channel dimension so images are (28, 28, 1) instead of (28, 28)
+            train_ds = train_ds.map(
+                lambda x, y: (tf.expand_dims(x, -1), y),
+                num_parallel_calls=tf.data.AUTOTUNE,
+            )
+        elif active_dataset == AvailableDatasets.FROMPATH and data_images_dir is not None:
             train_ds = keras.utils.image_dataset_from_directory(
                 data_images_dir,
                 label_mode=None,
@@ -98,22 +135,7 @@ def train():
                 shuffle=True,
             ).map(lambda x: (x, 0), num_parallel_calls=tf.data.AUTOTUNE)
         else:
-            # Use the Fashion MNIST dataset (only use one class)
-            used_class = 5
-            (train_images, train_labels), _ = keras.datasets.fashion_mnist.load_data()
-            train_images = train_images[train_labels == used_class]
-            train_labels = train_labels[train_labels == used_class]
-            train_ds = tf.data.Dataset.from_tensor_slices((train_images, train_labels))
-            # Set the labels to 0
-            train_ds = train_ds.map(
-                lambda x, y: (x, 0), num_parallel_calls=tf.data.AUTOTUNE
-            )
-            # Unsqueezing the channel dimension so images are (28, 28, 1) instead of (28, 28)
-            train_ds = train_ds.map(
-                lambda x, y: (tf.expand_dims(x, -1), y),
-                num_parallel_calls=tf.data.AUTOTUNE,
-            )
-
+            raise ValueError("No dataset selected")
         # Normalize to [-1, 1], shuffle and batch
         train_ds = (
             train_ds.map(augment)
