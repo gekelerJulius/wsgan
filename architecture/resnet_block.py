@@ -1,18 +1,41 @@
 import tensorflow as tf
 from tensorflow import keras
 
-keras.utils.get_custom_objects().clear()
+
+def get_default_block(filters, kernel_size, stride, padding, kernel_initializer):
+    return tf.keras.Sequential(
+        [
+            tf.keras.layers.Conv2D(
+                filters,
+                kernel_size,
+                strides=stride,
+                padding=padding,
+                kernel_initializer=kernel_initializer,
+            ),
+            tf.keras.layers.BatchNormalization(),
+            tf.keras.layers.LeakyReLU(alpha=0.1),
+            tf.keras.layers.Conv2D(
+                filters,
+                kernel_size,
+                padding=padding,
+                kernel_initializer=kernel_initializer,
+            ),
+            tf.keras.layers.BatchNormalization(),
+            tf.keras.layers.LeakyReLU(alpha=0.1),
+        ]
+    )
 
 
 @keras.utils.register_keras_serializable(package="MyLayers")
 class ResNetBlock(tf.keras.layers.Layer):
     def __init__(
         self,
-        filters,
-        kernel_size,
-        stride=1,
-        padding="same",
-        kernel_initializer="he_normal",
+        filters: int,
+        kernel_size: int,
+        stride: int = 1,
+        padding: str = "same",
+        kernel_initializer: str = "he_normal",
+        block: tf.keras.Sequential = None,
     ):
         super(ResNetBlock, self).__init__()
         self.filters = filters
@@ -20,27 +43,8 @@ class ResNetBlock(tf.keras.layers.Layer):
         self.stride = stride
         self.padding = padding
         self.kernel_initializer = kernel_initializer
-
-        self.block = tf.keras.Sequential(
-            [
-                tf.keras.layers.Conv2D(
-                    filters,
-                    kernel_size,
-                    strides=stride,
-                    padding=padding,
-                    kernel_initializer=kernel_initializer,
-                ),
-                tf.keras.layers.BatchNormalization(),
-                tf.keras.layers.LeakyReLU(alpha=0.1),
-                tf.keras.layers.Conv2D(
-                    filters,
-                    kernel_size,
-                    padding=padding,
-                    kernel_initializer=kernel_initializer,
-                ),
-                tf.keras.layers.BatchNormalization(),
-                tf.keras.layers.LeakyReLU(alpha=0.1),
-            ]
+        self.block = block or get_default_block(
+            filters, kernel_size, stride, padding, kernel_initializer
         )
 
         self.matching_conv = tf.keras.layers.Conv2D(
