@@ -36,28 +36,38 @@ class UNetModel(keras.Model):
         timestep: int = 0,
     ) -> tf.Tensor:
         x = self.unet(inputs)
-        return (x * 2) - 1  # Move output to [-1, 1] range
+        # The model should predict the noise that was added to the original image
+        # So the output should be between -1 and 1
+        # To achieve this, we use a tanh activation function
+        x = tf.tanh(x)
+        return x
 
     def train_step(self, data: Tuple[tf.Tensor, tf.Tensor]) -> Dict[str, float]:
         x, _ = data  # We ignore the labels since they are not used
         x: tf.Tensor = x
 
+        # x has shape (batch_size, image_side_length, image_side_length, channels)
+        # and ranges from -1 to 1
+        # The model should try to predict the amount of noise added to the image
+        noise = tf.random.normal(tf.shape(x), mean=0.0, stddev=1.0)
+        losses = []
+
         with tf.GradientTape() as tape:
-            loss = 0.0
-            for t in range(self.num_timesteps, 0, -1):
-                noise = tf.random.normal(shape=tf.shape(x))
-                noisy_image = x + noise * (
-                    t / self.num_timesteps
-                )  # Incremental noise addition
-                pred_image = self(noisy_image, training=True)
-                loss += self.loss_fn(x, pred_image)
+            for i in range(self.num_timesteps):
+                current_noise_level = math.sqrt(1 - (i / self.num_timesteps))
+                x_noisy = x + noise * current_noise_level
+                x_noisy = tf.clip_by_value(x_noisy, -1.0, 1.0)
+                # The model predicts the noise that was added to the original image
+                predicted_noise = self(inputs=x_noisy, training=True, timestep=i)
+                # Calculate the loss for the current timestep and add to the list
+                loss = self.loss_fn(noise * current_noise_level, predicted_noise)
+                losses.append(loss)
 
-        # Calculate gradients and update model weights
-        grads = tape.gradient(loss, self.trainable_variables)
-        self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
+            total_loss_tensor = tf.reduce_mean(losses)
 
-        # Return a dict mapping metrics names to their current value
-        return {"loss": loss}
+        gradients = tape.gradient(total_loss_tensor, self.trainable_variables)
+        self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
+        return {"loss": total_loss_tensor}
 
 
 if __name__ == "__main__":

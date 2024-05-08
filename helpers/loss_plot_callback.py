@@ -1,7 +1,10 @@
+import os
 from typing import List
 
 from tensorflow.keras.callbacks import Callback
 import matplotlib.pyplot as plt
+
+from diffusion import config
 
 
 class LossPlotCallback(Callback):
@@ -27,5 +30,5 @@ class LossPlotCallback(Callback):
         plt.xlabel("Epoch")
         plt.ylabel("Loss")
         plt.legend([label for label in self.labels], loc="upper right")
-        plt.savefig("losses.png")
+        plt.savefig(os.path.join(config.PLOTS_DIR, "losses.png"))
         plt.close()

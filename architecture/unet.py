@@ -1,5 +1,18 @@
 import tensorflow as tf
 from tensorflow import keras
+from tensorflow.keras import layers, Model, Sequential
+
+
+class TimestepEmbedding(layers.Layer):
+    def __init__(self, channels):
+        super().__init__()
+        self.dense = layers.Dense(channels)
+
+    def call(self, timestep):
+        # Assuming timestep is a scalar or batch of scalars
+        x = tf.expand_dims(timestep, -1)  # Shape: (batch_size, 1)
+        x = self.dense(x)  # Shape: (batch_size, channels)
+        return x
 
 
 def get_conv_block(
@@ -10,29 +23,30 @@ def get_conv_block(
     kernel_initializer: str = "he_normal",
     final: bool = False,
 ):
-    layers = [
-        tf.keras.layers.Conv2D(
+    layer_array = [
+        layers.Conv2D(
             filters,
             kernel_size,
             padding=padding,
             strides=strides,
             kernel_initializer=kernel_initializer,
         ),
-        tf.keras.layers.BatchNormalization(),
-        tf.keras.layers.ReLU(),
-        tf.keras.layers.Conv2D(
+        layers.BatchNormalization(),
+        layers.LeakyReLU(),
+        layers.Conv2D(
             filters,
             kernel_size,
             padding=padding,
             kernel_initializer=kernel_initializer,
         ),
-        tf.keras.layers.BatchNormalization(),
-        tf.keras.layers.ReLU(),
+        layers.BatchNormalization(),
+        layers.LeakyReLU(),
+        layers.Dropout(0.2),
     ]
 
     if final:
-        layers.append(
-            tf.keras.layers.Conv2D(
+        layer_array.append(
+            layers.Conv2D(
                 filters,
                 kernel_size,
                 padding=padding,
@@ -40,12 +54,10 @@ def get_conv_block(
                 activation="sigmoid",
             )
         )
-    else:
-        layers.append(tf.keras.layers.Dropout(0.5))
-    return tf.keras.Sequential(layers)
+    return Sequential(layer_array)
 
 
-class UNetBlock(tf.keras.layers.Layer):
+class UNetBlock(layers.Layer):
     def __init__(
         self,
         filters: int,
@@ -67,10 +79,24 @@ class UNetBlock(tf.keras.layers.Layer):
             kernel_initializer=kernel_initializer,
             final=False,
         )
-        self.pool = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))
+        self.pool = layers.MaxPooling2D(pool_size=(2, 2))
 
-    def call(self, inputs: tf.Tensor):
+    def call(
+        self,
+        inputs: tf.Tensor,
+        training=False,
+        mask=None,
+        timestep_embedding: tf.Tensor = None,
+    ):
         x = self.conv_block(inputs)
+
+        if timestep_embedding is not None:
+            timestep_embedding = tf.reshape(
+                timestep_embedding, [1, 1, 1, -1]
+            )  # Adjust the shape accordingly
+            timestep_embedding = tf.broadcast_to(timestep_embedding, tf.shape(x))
+            x += timestep_embedding  # Adding the timestep embedding to the feature maps
+
         p = self.pool(x)
         return x, p
 
@@ -86,7 +112,7 @@ class UNetBlock(tf.keras.layers.Layer):
 
 
 @keras.utils.register_keras_serializable(package="MyLayers")
-class UNet(tf.keras.Model):
+class UNet(Model):
     def __init__(
         self, output_channels: int, depth: int, initial_filters: int, **kwargs
     ):
@@ -94,6 +120,8 @@ class UNet(tf.keras.Model):
         self.output_channels = output_channels
         self.depth = depth
         self.initial_filters = initial_filters
+
+        self.first_block: UNetBlock = UNetBlock(initial_filters)
 
         self.down_blocks = []
         self.up_blocks = []
@@ -118,10 +146,18 @@ class UNet(tf.keras.Model):
             final=True,
         )
 
-    def call(self, inputs: tf.Tensor, training=False, mask=None):
+    def call(self, inputs: tf.Tensor, training=False, mask=None, timestep: int = -1):
         x = inputs
-        skips: list = []
+        if timestep == -1:
+            timestep_embedding = None
+        else:
+            timestep_embedding = TimestepEmbedding(self.initial_filters)(timestep)
 
+        x, p = self.first_block(
+            inputs=x, training=training, timestep_embedding=timestep_embedding
+        )
+
+        skips: list = []
         for down_block in self.down_blocks:
             x, p = down_block(x)
             skips.append(x)
@@ -129,12 +165,12 @@ class UNet(tf.keras.Model):
 
         skips = skips[::-1]
         for skip, up_block in zip(skips, self.up_blocks):
-            x = tf.keras.layers.UpSampling2D(size=(2, 2))(x)
-            x = tf.keras.layers.concatenate([x, skip])
+            x = layers.UpSampling2D(size=(2, 2))(x)
+            x = layers.concatenate([x, skip])
             x = up_block.conv_block(x)
 
-        x = tf.keras.layers.UpSampling2D(size=(2, 2))(x)
-        x = tf.keras.layers.concatenate([x, skips[-1]])
+        x = layers.UpSampling2D(size=(2, 2))(x)
+        x = layers.concatenate([x, skips[-1]])
         x = self.final_block(x)
         return x
 

@@ -1,5 +1,5 @@
-tensorflow==2.10.1
-tfds-nightly==4.9.3.dev202311230044
-tqdm
+tensorflow
+tfds-nightly
 matplotlib
 black
+tqdm
